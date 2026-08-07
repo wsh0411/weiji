@@ -1,0 +1,25 @@
+{
+  "name": "未济 · 个人成长工作台",
+  "short_name": "未济",
+  "description": "明道·集义 — 学业备考与日常成长个人工作台",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F7F2EA",
+  "theme_color": "#8B1E24",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='36' fill='%238B1E24'/%3E%3Ctext x='96' y='132' font-size='116' text-anchor='middle' fill='%23E4CE9C' font-family='serif'%3E䷿%3C/text%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%238B1E24'/%3E%3Ctext x='256' y='352' font-size='310' text-anchor='middle' fill='%23E4CE9C' font-family='serif'%3E䷿%3C/text%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
