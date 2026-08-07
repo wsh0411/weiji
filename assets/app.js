@@ -222,7 +222,40 @@ function migrate(d){
     if(txt&&txt.trim()){ (d.notes.reviewMonth[dk]=d.notes.reviewMonth[dk]||[]).push({t:'',text:txt}); } }); }
   delete d.reviews;
 }
-function save(){ try{ localStorage.setItem(KEY, JSON.stringify(DB)); }catch(e){ toast('存储空间不足'); } }
+function save(){ try{ localStorage.setItem(KEY, JSON.stringify(DB)); }catch(e){ toast('存储空间不足'); } snapshotBackup(); }
+
+/* 自动备份：每次保存写入当日全量快照，仅保留最新一份，旧备份自动清理；
+   仅轮换备份副本，绝不触碰主数据(KEY)，故不影响全部数据的完整性。 */
+const BAK_PREFIX='weiji_bak_';
+function hasData(){
+  if(Object.keys(DB.checkins).length>0) return true;
+  if(Object.keys(DB.records).length>0) return true;
+  return Object.values(DB.notes).some(arr=>Object.keys(arr).length>0);
+}
+function snapshotBackup(){
+  if(!hasData()) return;            // 空数据（如刚清空）不写备份、也不清理旧备份
+  try{
+    const t=todayStr();
+    localStorage.setItem(BAK_PREFIX+t, JSON.stringify(DB));
+    for(let i=localStorage.length-1;i>=0;i--){
+      const k=localStorage.key(i);
+      if(k && k.startsWith(BAK_PREFIX) && k!==BAK_PREFIX+t) localStorage.removeItem(k);
+    }
+  }catch(e){ /* 配额不足时忽略 */ }
+}
+function latestBackupKey(){
+  let best=null;
+  for(let i=0;i<localStorage.length;i++){
+    const k=localStorage.key(i);
+    if(k && k.startsWith(BAK_PREFIX)){ const d=k.slice(BAK_PREFIX.length); if(!best||d>best) best=k; }
+  }
+  return best;
+}
+function restoreBackup(){
+  const k=latestBackupKey(); if(!k) return false;
+  try{ const data=JSON.parse(localStorage.getItem(k)); DB=Object.assign(blank(),data); save(); return true; }
+  catch(e){ return false; }
+}
 
 function ci(date){ return (DB.checkins[date] ||= {mingdao:{}, jiyi:{}}); }
 function toggleMingdao(date,id){ const c=ci(date); c.mingdao[id]=!c.mingdao[id]; if(!c.mingdao[id]) delete c.mingdao[id]; save(); }
@@ -474,7 +507,7 @@ function reviewCard(type, dateKey, hint, placeholder){
   const list=store[dateKey]||[];
   const latest=list[list.length-1];
   const preview = latest
-    ? `<span class="rv-time">${latest.t?escapeHTML(String(latest.t).split(' ')[0]):CN_DATE(dateKey)}</span>${escapeHTML(latest.text).slice(0,58)}${latest.text.length>58?'…':''}`
+    ? `<span class="rv-time">${latest.t?escapeHTML(String(latest.t).split(' ')[0]):CN_DATE(dateKey)}</span>${latest.title?`<b style="color:var(--ruc-red)">${escapeHTML(latest.title)}：</b>`:''}${escapeHTML(latest.text).slice(0,58)}${latest.text.length>58?'…':''}`
     : `<span style="color:var(--ink-soft)">${placeholder}…（尚未记录，点击开始）</span>`;
   return `<div class="card review-box">
     <h3 class="serif" style="color:var(--ruc-red);margin-bottom:6px">${meta.e} ${meta.n}</h3>
@@ -696,9 +729,9 @@ function fvData(){
   let out=[];
   if(fv.mode==='note'){
     const store=DB.notes[fv.type]||{};
-    Object.keys(store).sort().reverse().forEach(date=> store[date].forEach((it,i)=> out.push({date,i,t:it.t||'',text:it.text})));
+    Object.keys(store).sort().reverse().forEach(date=> store[date].forEach((it,i)=> out.push({date,i,t:it.t||'',title:it.title||'',text:it.text})));
   } else {
-    Object.keys(DB.records).sort().reverse().forEach(date=> (DB.records[date][fv.cat]||[]).forEach((it,i)=> out.push({date,i,t:it.t||'',text:it.text})));
+    Object.keys(DB.records).sort().reverse().forEach(date=> (DB.records[date][fv.cat]||[]).forEach((it,i)=> out.push({date,i,t:it.t||'',title:it.title||'',text:it.text})));
   }
   if(fv.date) out=out.filter(x=>x.date===fv.date);
   return out;
@@ -706,11 +739,12 @@ function fvData(){
 function renderFullList(){
   const q=fv.filter.trim().toLowerCase();
   let data=fvData();
-  if(q) data=data.filter(x=> x.text.toLowerCase().includes(q) || x.date.includes(q));
+  if(q) data=data.filter(x=> x.text.toLowerCase().includes(q) || (x.title||'').toLowerCase().includes(q) || x.date.includes(q));
   const el=document.getElementById('fvList');
   if(!data.length){ el.innerHTML='<div class="hint" style="padding:24px;text-align:center">暂无记录，点击右下角「＋ 新建记录」开始。</div>'; return; }
   el.innerHTML=data.map((it,idx)=>`<div class="rec-item">
     <div class="ri-time">${CN_DATE(it.date)}${it.t?' · '+escapeHTML(it.t):''}</div>
+    ${it.title?`<div class="ri-title">${escapeHTML(it.title)}</div>`:''}
     <div class="ri-text">${escapeHTML(it.text)}</div>
     <div class="ri-actions"><button class="ri-edit" data-edit="${idx}">编辑</button><button class="ri-del" data-del="${idx}">删除</button></div></div>`).join('');
   el.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{
@@ -721,48 +755,62 @@ function renderFullList(){
   });
   el.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>{
     const it=data[+b.dataset.edit]; fv.editing=it;
+    document.getElementById('fvTitleInput').value=it.title||'';
     document.getElementById('fvInput').value=it.text;
     document.getElementById('fvEditor').hidden=false;
-    document.getElementById('fvInput').focus();
+    document.getElementById('fvTitleInput').focus();
   });
 }
 function fvSave(){
+  const title=(document.getElementById('fvTitleInput').value||'').trim();
   const text=document.getElementById('fvInput').value;
   const date=fv.editing?.date||fv.date||fv.newDate||todayStr();
   if(fv.mode==='note'){
     const arr=noteList(fv.type,date);
-    if(fv.editing && fv.editing.date===date && fv.editing.i<arr.length) arr[fv.editing.i].text=text, arr[fv.editing.i].t=new Date().toLocaleString('zh-CN');
-    else arr.push({t:new Date().toLocaleString('zh-CN'),text});
+    if(fv.editing && fv.editing.date===date && fv.editing.i<arr.length){ arr[fv.editing.i].text=text; arr[fv.editing.i].title=title; arr[fv.editing.i].t=new Date().toLocaleString('zh-CN'); }
+    else arr.push({t:new Date().toLocaleString('zh-CN'),title,text});
   } else {
     const arr=recs(date)[fv.cat];
-    if(fv.editing && fv.editing.date===date && fv.editing.i<arr.length) arr[fv.editing.i].text=text, arr[fv.editing.i].t=new Date().toLocaleString('zh-CN');
-    else arr.push({t:new Date().toLocaleString('zh-CN'),text});
+    if(fv.editing && fv.editing.date===date && fv.editing.i<arr.length){ arr[fv.editing.i].text=text; arr[fv.editing.i].title=title; arr[fv.editing.i].t=new Date().toLocaleString('zh-CN'); }
+    else arr.push({t:new Date().toLocaleString('zh-CN'),title,text});
   }
-  save(); document.getElementById('fvEditor').hidden=true; fv.editing=null; renderFullList(); renderCalendar(); refreshCurrent(); toast('已保存');
+  save(); document.getElementById('fvEditor').hidden=true; fv.editing=null;
+  document.getElementById('fvTitleInput').value=''; document.getElementById('fvInput').value='';
+  renderFullList(); renderCalendar(); refreshCurrent(); toast('已保存');
 }
 function fvNew(){
   fv.editing=null;
+  document.getElementById('fvTitleInput').value='';
   document.getElementById('fvInput').value='';
   document.getElementById('fvEditor').hidden=false;
-  document.getElementById('fvInput').focus();
+  document.getElementById('fvTitleInput').focus();
 }
 function closeFullView(){ document.getElementById('fullView').hidden=true; fv={mode:null}; refreshCurrent(); }
 
 /* ---------- 10. 设置 / 数据管理 ---------- */
 function openSettings(){
   const size=(JSON.stringify(DB).length/1024).toFixed(1);
+  const bakKey=latestBackupKey();
+  const bakInfo = bakKey ? `已自动备份至 <b>${bakKey.slice(BAK_PREFIX.length)}</b>（每次保存自动滚动更新，仅保留最新一份）` : '尚未生成自动备份';
   openModal('⚙ 设置与数据管理',
     `<div class="hint">本地已存储数据约 <b>${size} KB</b>，自 ${DB.meta.created||'—'} 起累计。所有数据保存在本设备浏览器，永久留存。</div>
-     <div class="rec-item"><div class="ri-text"><b>数据备份 / 迁移：</b>导出为 JSON 文件，可在其他设备（如手机）导入，实现数据同步。</div></div>
+     <div class="rec-item"><div class="ri-text"><b>自动备份：</b>${bakInfo}。它与实时数据分开存放，恢复前不影响全部数据的完整性。</div></div>
      <div class="btn-row">
-       <button class="btn" id="stExport">⬇ 导出数据</button>
+       <button class="btn" id="stRestore">♻ 从自动备份恢复</button>
+       <button class="btn gold" id="stExport">⬇ 导出数据（迁移用）</button>
        <label class="btn ghost" style="cursor:pointer">⬆ 导入数据<input type="file" id="stImport" accept="application/json" hidden></label>
-       <button class="btn gold" id="stInstall">📱 安装到桌面/手机</button>
+       <button class="btn ghost" id="stInstall">📱 安装到桌面/手机</button>
      </div>
+     <div class="rec-item" style="margin-top:6px"><div class="ri-text" style="color:var(--ink-soft);font-size:12.5px">说明：自动备份会在每次「保存」时生成当日全量快照，并自动删除前一天旧备份，避免重复占用空间。需要换设备/长期归档时，用「导出数据」另存一份 JSON 即可。</div></div>
      <div class="hint" style="margin-top:14px">危险操作：清空将删除全部本地记录，不可恢复。</div>
      <div class="btn-row"><button class="btn ghost" id="stClear" style="color:#b00">🗑 清空全部数据</button></div>`,
     `<button class="btn" id="mCancel">关闭</button>`);
   document.getElementById('mCancel').onclick=closeModal;
+  document.getElementById('stRestore').onclick=()=>{
+    if(!bakKey){ toast('暂无可恢复的自动备份'); return; }
+    if(confirm('将从自动备份恢复全部记录，覆盖当前未保存的更改。继续？')){
+      if(restoreBackup()){ closeModal(); show('today'); toast('已从自动备份恢复'); } else toast('恢复失败'); }
+  };
   document.getElementById('stExport').onclick=exportData;
   document.getElementById('stImport').onchange=importData;
   document.getElementById('stInstall').onclick=()=>{ if(deferredPrompt){deferredPrompt.prompt();} else toast('可用浏览器菜单「添加到主屏幕」'); };
