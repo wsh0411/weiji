@@ -599,18 +599,36 @@ function renderJiyiData(){
     <div class="legend" style="flex-direction:column">${recSegs.map(s=>`<span><i style="background:${s.color}"></i>${s.label} · ${s.value} 条</span>`).join('')}</div></div></div>`;
 }
 
-/* 每月总结聚合：明道（reviewMonth 记录） + 集义（打卡/记录按月统计） */
+/* 每月数据总结：明道（学习任务 + 复盘撰写统计，按月份聚合） + 集义（打卡/记录按月统计） */
+function countNotesMonth(type,m){
+  const store=DB.notes[type]||{};
+  return Object.keys(store).filter(k=>monthKey(k)===m).reduce((a,k)=>a+store[k].length,0);
+}
+function monthlyMingdaoSummary(n){
+  n=n||6; const out=[]; const t=todayStr();
+  for(let i=0;i<n;i++){ const d=parseDate(t); d.setMonth(d.getMonth()-i);
+    const m=fmtDate(d).slice(0,7);
+    let studyDays=0, hours=0, totalTasks=0, doneTasks=0;
+    Object.keys(DB.checkins).forEach(date=>{ if(monthKey(date)!==m) return;
+      const c=DB.checkins[date].mingdao||{}; const {rest,tasks}=mingdaoTasks(date);
+      if(rest||!tasks.length) return;
+      const study=tasks.filter(x=>x.h>0);
+      const done=study.filter(x=>c[x.id]).length;
+      if(done>0) studyDays++;
+      totalTasks+=study.length; doneTasks+=done;
+      study.forEach(x=>{ if(c[x.id]) hours+=(x.h||0); });
+    });
+    const reviews=countNotesMonth('reviewDay',m)+countNotesMonth('reviewWeek',m)+countNotesMonth('reviewMonth',m);
+    out.push({month:m, studyDays, hours:Math.round(hours), avgPct: totalTasks?Math.round(doneTasks/totalTasks*100):0, reviews});
+  }
+  return out;
+}
 function mdMonthSummaryHTML(){
-  const store=DB.notes.reviewMonth||{};
-  const keys=Object.keys(store).filter(k=>(store[k]||[]).length>0).sort().reverse();
-  if(!keys.length) return '<div class="hint" style="padding:8px">尚未撰写任何每月总结，点下方「写本月总结」开启。</div>';
-  return '<div class="month-sum-list">'+keys.slice(0,8).map(k=>{
-    const arr=store[k], latest=arr[arr.length-1], m=k.slice(0,7);
-    return `<div class="ms-item">
-      <button class="ms-link" data-note="reviewMonth" data-date="${k}"><b>${m} 月</b><span class="ms-cnt">${arr.length} 条</span></button>
-      <div class="ms-prev">${latest.title?escapeHTML(latest.title)+'：':''}${escapeHTML(latest.text).slice(0,40)}${latest.text.length>40?'…':''}</div>
-    </div>`;
-  }).join('')+'</div>';
+  const rows=monthlyMingdaoSummary(6);
+  return '<table class="mini-table"><thead><tr><th>月份</th><th>学习天数</th><th>累计学时</th><th>日均完成</th><th>复盘篇数</th></tr></thead><tbody>'
+    + rows.map(r=>`<tr><td>${r.month}</td><td>${r.studyDays} 天</td><td>${r.hours} h</td><td>${r.avgPct}%</td><td>${r.reviews} 篇</td></tr>`).join('')
+    + '</tbody></table>'
+    + '<div class="hint" style="margin-top:8px;font-size:12px">学习天数 = 当月有明道任务打卡的天数；累计学时 = 已打卡任务的学时总和；日均完成 = 当月所有学习日的平均完成率；复盘篇数 = 日复盘 / 周总结 / 月总结累计撰写数。</div>';
 }
 function monthlyJiyiSummary(n){
   n=n||6; const out=[]; const t=todayStr();
@@ -657,15 +675,14 @@ V.data = ()=>{
     <div class="card" style="text-align:center"><h3 class="serif" style="margin-bottom:10px">今日集义</h3>${ringSVG(jy.pct,`${jy.done}/${jy.total}`)}</div>
   </div>
 
-  <div class="section-title" style="margin-top:18px"><span class="bar"></span><h2>每月总结</h2><span class="sub">明道复盘 · 集义成长 月度回顾</span></div>
+  <div class="section-title" style="margin-top:18px"><span class="bar"></span><h2>每月数据总结</h2><span class="sub">明道学习 · 集义成长 月度数据回顾</span></div>
   <div class="grid grid-2">
     <div class="card">
-      <h3 class="serif" style="margin-bottom:8px">📅 明道 · 每月总结</h3>
+      <h3 class="serif" style="margin-bottom:8px">📅 明道 · 每月数据总结</h3>
       <div id="mdMonthSummary"></div>
-      <div class="btn-row" style="margin-top:10px"><button class="btn sm" data-note="reviewMonth" data-date="${monthKey(t)+'-01'}">✎ 写本月总结</button></div>
     </div>
     <div class="card">
-      <h3 class="serif" style="margin-bottom:8px">🌾 集义 · 每月总结</h3>
+      <h3 class="serif" style="margin-bottom:8px">🌾 集义 · 每月数据总结</h3>
       <div id="jyMonthSummary"></div>
     </div>
   </div>`;
