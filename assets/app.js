@@ -163,8 +163,8 @@ const JIYI_ITEMS = [
   {key:'water',   name:'每日饮水', emoji:'💧', desc:'完成 2000ml 及以上饮水量', rec:false},
   {key:'fitness', name:'规律健身', emoji:'🏋️', desc:'每周 4 练 · 每日两个部位', rec:false, fitness:true},
   {key:'rope',    name:'跳绳打卡', emoji:'🪢', desc:'非健身日完成跳绳 200 个', rec:false, rope:true},
-  {key:'liberal', name:'文科积累', emoji:'📖', desc:'每日了解 10 个文科知识点', rec:true, noteType:'liberal'},
-  {key:'science', name:'理科积累', emoji:'🔬', desc:'每日了解 10 个理科知识点', rec:true, noteType:'science'},
+  {key:'liberal', name:'文科积累', emoji:'📖', desc:'每日了解 5 个文科知识点', rec:true, noteType:'liberal'},
+  {key:'science', name:'理科积累', emoji:'🔬', desc:'每日了解 5 个理科知识点', rec:true, noteType:'science'},
   {key:'ai',      name:'AI 学习',  emoji:'🤖', desc:'每日预留 30 分钟学习 AI', rec:true, noteType:'ai'},
 ];
 /* 当日实际显示的集义打卡项：健身日显示健身、非健身日显示跳绳 */
@@ -599,6 +599,37 @@ function renderJiyiData(){
     <div class="legend" style="flex-direction:column">${recSegs.map(s=>`<span><i style="background:${s.color}"></i>${s.label} · ${s.value} 条</span>`).join('')}</div></div></div>`;
 }
 
+/* 每月总结聚合：明道（reviewMonth 记录） + 集义（打卡/记录按月统计） */
+function mdMonthSummaryHTML(){
+  const store=DB.notes.reviewMonth||{};
+  const keys=Object.keys(store).filter(k=>(store[k]||[]).length>0).sort().reverse();
+  if(!keys.length) return '<div class="hint" style="padding:8px">尚未撰写任何每月总结，点下方「写本月总结」开启。</div>';
+  return '<div class="month-sum-list">'+keys.slice(0,8).map(k=>{
+    const arr=store[k], latest=arr[arr.length-1], m=k.slice(0,7);
+    return `<div class="ms-item">
+      <button class="ms-link" data-note="reviewMonth" data-date="${k}"><b>${m} 月</b><span class="ms-cnt">${arr.length} 条</span></button>
+      <div class="ms-prev">${latest.title?escapeHTML(latest.title)+'：':''}${escapeHTML(latest.text).slice(0,40)}${latest.text.length>40?'…':''}</div>
+    </div>`;
+  }).join('')+'</div>';
+}
+function monthlyJiyiSummary(n){
+  n=n||6; const out=[]; const t=todayStr();
+  for(let i=0;i<n;i++){ const d=parseDate(t); d.setMonth(d.getMonth()-i);
+    const m=fmtDate(d).slice(0,7); let cd=0, rec=0;
+    Object.keys(DB.checkins).forEach(date=>{ if(monthKey(date)===m){ const jy=DB.checkins[date].jiyi; if(jy&&Object.keys(jy).length>0) cd++; } });
+    Object.keys(DB.records).forEach(date=>{ if(monthKey(date)===m){ const r=DB.records[date]; rec+=REC_CATS.reduce((a,c)=>a+(r[c.key]?.length||0),0); } });
+    out.push({month:m, checkinDays:cd, recCnt:rec});
+  }
+  return out;
+}
+function jyMonthSummaryHTML(){
+  const rows=monthlyJiyiSummary(6);
+  return '<table class="mini-table"><thead><tr><th>月份</th><th>打卡天数</th><th>记录条数</th></tr></thead><tbody>'
+    + rows.map(r=>`<tr><td>${r.month}</td><td>${r.checkinDays} 天</td><td>${r.recCnt} 条</td></tr>`).join('')
+    + '</tbody></table>'
+    + '<div class="hint" style="margin-top:8px;font-size:12px">打卡天数为当月有集义打卡记录的天数；记录条数为四大记录累计。</div>';
+}
+
 /* ===== 数据看板（综合） ===== */
 V.data = ()=>{
   const el=document.getElementById('view-data'), t=todayStr();
@@ -624,7 +655,23 @@ V.data = ()=>{
   <div class="grid grid-2" style="margin-top:14px">
     <div class="card" style="text-align:center"><h3 class="serif" style="margin-bottom:10px">今日明道</h3>${ringSVG(md.total?md.pct:100,`${md.done}/${md.total}`)}</div>
     <div class="card" style="text-align:center"><h3 class="serif" style="margin-bottom:10px">今日集义</h3>${ringSVG(jy.pct,`${jy.done}/${jy.total}`)}</div>
+  </div>
+
+  <div class="section-title" style="margin-top:18px"><span class="bar"></span><h2>每月总结</h2><span class="sub">明道复盘 · 集义成长 月度回顾</span></div>
+  <div class="grid grid-2">
+    <div class="card">
+      <h3 class="serif" style="margin-bottom:8px">📅 明道 · 每月总结</h3>
+      <div id="mdMonthSummary"></div>
+      <div class="btn-row" style="margin-top:10px"><button class="btn sm" data-note="reviewMonth" data-date="${monthKey(t)+'-01'}">✎ 写本月总结</button></div>
+    </div>
+    <div class="card">
+      <h3 class="serif" style="margin-bottom:8px">🌾 集义 · 每月总结</h3>
+      <div id="jyMonthSummary"></div>
+    </div>
   </div>`;
+  document.getElementById('mdMonthSummary').innerHTML=mdMonthSummaryHTML();
+  document.getElementById('jyMonthSummary').innerHTML=jyMonthSummaryHTML();
+  el.querySelectorAll('[data-note]').forEach(b=>b.onclick=()=>openFullView('note',{type:b.dataset.note,date:b.dataset.date}));
 };
 
 /* ===== 计划总览 ===== */
@@ -674,7 +721,7 @@ function renderPlanTable(){
       : tasks.filter(t=>t.h>0).map(t=>`${escapeHTML(t.name)}<span style="color:#999">(${t.h}h)</span>`).join('、') || '—';
     const fit = f?`${f.emoji}${f.title}`:'🪢 跳绳 200 个';
     rows+=`<tr class="${rest?'rest':''}"><td class="pd">${m}/${d}<br><span style="color:#999;font-weight:400">${WD_CN[weekdayOf(ds)]}</span></td>
-      <td>${study}</td><td>饮水2000ml · 文科10 · 理科10 · AI30min</td><td>${fit}</td></tr>`;
+      <td>${study}</td><td>饮水2000ml · 文科5 · 理科5 · AI30min</td><td>${fit}</td></tr>`;
   }
   document.getElementById('planTable').innerHTML=
     `<thead><tr><th>日期</th><th>明道 · 学习任务</th><th>集义 · 每日固定</th><th>健身</th></tr></thead><tbody>${rows}</tbody>`;
